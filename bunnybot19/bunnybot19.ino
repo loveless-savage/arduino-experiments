@@ -1,4 +1,4 @@
-///red bumped = 0, blue bumped = 1
+// red bumped = 0, blue bumped = 1
 #define WHICH_COLOR 0
 
 // which arduino? each one has slightly different tuning
