@@ -1,0 +1,105 @@
+DOCUMENTATION FOR GROUP 1 ARDUINOS
+
+SETUP
+Group 1's arduinos are wired like this:
+
+ _______
+|       |
+|Serial |                                                  +9v|=======\===============================\
+|monitor|                                                             |   pressure sensor             |
+|_______|==============USB                                           PWR       |%|                   PWR
+                    ___|@|___                                     ___|@|___    \_/ compass chip   ___|@|___
+           ------5v|         |12--------------/        /-------12|         |    |     v____v     |         |
+          | ----Gnd| topside |8--------------/        /---------8| onboard |    |     |    |     |  slave  |
+          || ----A0|  (-X+)  |7-------------/(tether)/----------7|  (-X+)  |    |     |_  _|     |  (-X+)  |
+          ||| ---A1|         |5------------/        /-----------5|         |A3--        ||       |         |
+          |||| --A2|         |4-----------/        /------------4|         |A4----------^+-----A4|         |
+          ||||| -A3|_________|3----------/        /-------------3|_________|A5-----------^-----A5|_________|
+          ||||||                                                    |9 |11                         |5 |9 |11
+          \\|///                                                    6| ||                          3| 6| ||
+           \\//                                                     ||10|                          || ||10|
+            ||                                                 _____||-||---vvvv--H-bridges--vvvv--//-||-||
+            ||                                                | ___|_|  \\                        //  // ||
+          /****\controller                                    ||   |/   ||                       //  //  ||
+         / 0__0 \                                            |H | |H | |H |front           front|H ||H ||H |back
+         \_/  \_/                                            |__| |__| |__|left            right|__||__||__|left
+                                                             vertical                               back
+                                                             left,right                             right
+
+WIRES
+	CONTROLLER
+topside  cable		function
+Gnd=	br solid	+5v
++5v=	br striped	Gnd
+A0=	gn solid	side
+A1=	gn stripe	forth
+A2=	bl solid	turn
+A3=	bl striped	vr
+
+	CABLE
+topside	 cable	function		onboard
+4	bk	topside clock		2
+5	gy	topside data		3
+6	gn	--			4
+7	bl	--			5
+8	ye	onboard clock		7
+9	wh	--			8
+10	or	onboard data		12
+
+CODE
+The general outline of the code is as follows:
+
+-topside reads controller and compresses values into a single 16 bit variable: motordata
+-onboard reads sensors and compresses values into a single 16 bit variable: sensordata
+
+-topside and onboard begin COM sequence
+-onboard receives motordata and topside receives sensordata
+
+-topside decompresses sensordata and prints the resultant sensor values to the serial monitor
+
+-onboard sends the motordata variable to the slave via i2c communication
+-slave receives motordata
+
+-onboard and slave decompress motordata and store the resultant values locally
+-onboard and slave transform the motor values for each motor
+-onboard and slave send motor values to their respective H-bridges via PWM
+
+COMPRESSING
+topside and onboard arduinos each compress a set of data points for COM transmission.  Both compressed variables are type uint16_t.
+
+	TOPSIDE:
+since arduino reads analog values on a scale of 0 to 1023- 10 bits- so we first bitshift it two places over so it fits into an 8-bit integer.
+however, we want movement in either direction, so we translate the current value from [0,255] to [-128,127]
+for this we simply invert the first bit.
+	signed integers store negative numbers as a wraparound of the second half of the possible positive range...
+	they take the second half of the range, and without changing any bit combinations, interpret them as negatives.
+	so 00000000,00000001...01111111 is interpreted as 0,1...127
+	and 10000000,10000001...11111111 is interpreted as -128,-127...-1
+	by inverting the first bit we translate 10000000:-128 to 00000000:0 and 01111111:127 to 11111111:-1
+now the potentiometer will read 0 in the middle, -128 to one side, and 127 to the other.
+
+16 units is plenty accurate for our motors; this requires 4 bits.
+but we don't want less power running the motors, so we don't divide it or bitshift it: we will simply get rid of the last four bits.
+for this we use a bitmask.
+	bitwise functions perform logic with values one bit at a time.
+	a bitwise AND function is written '&' in the code as opposed to '&&'
+	(0 & 0)= 0	(00 & 10)= 00
+	(1 & 0)= 0	(11 & 11)= 11
+	(1 & 1)= 1	(11 & 01)= 01
+	(xxxxxxxx & 11110000)= xxxx0000 where x is any bit; 11110000 is a bitmask because it 'masks' the last four bits.
+
+before we reduce its resolution, however, we want to translate the values down a bit.
+position 0 of the potentiometer reads out as 0.
+slightly above position 0 still reads out as 0.
+but slightly below position 0 reads out as -1, so even the breeze nudging the joystick will make the ROV inch backwards.
+so we add a buffer value to the readout so the potentiometer reads out 0 both above and below for a ways.
+
+int8_t transf_axis(int inputaxis){
+        joyt=analogRead(inputaxis) >> 2;	//read whichever potentiometer and shrink it to 8 bits
+        joyt^=1<<7;				//this flips the sign bit: in effect, this translates zero to the center potentiometer state
+        if(joyt<120){
+                joyt+=8;			//position zero is now to either side of the center point, not just above it
+        }   
+        joyt&=0b11110000;			//reduce the resolution of the measurement, so only the four least precise bits are kept
+        return joyt;
+}
