@@ -1,3 +1,18 @@
+/* arduino code for the 2018 bunnybot color sorters
+ * each of three arduinos has an adafruit color sensor and a servo attached.
+ * the arduinos are programmed to operate as follows:
+	> detect the color of an incoming ball
+	> if the ball is of the desired color, the servo retracts a paddle and allows it to drop into a hopper
+	> if the ball is the wrong color, the servo deflects it off the bot
+	> the servo does not move until it needs to react to an opposite colored ball
+	  -this means it will only flip-flop once to channel 3 red balls in a row.
+ * the arduinos work autonomously and need no driver input. They are not connected to the RoboRIO,
+   and draw power independently from the battery
+ * all three arduinos are connected to a toggle switch which determines which color- red or blue-
+   is rejected that round, with no need to restart the arduinos
+*/
+
+
 // red bumped = 0, blue bumped = 1
 #define WHICH_COLOR 0
 
