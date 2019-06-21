@@ -4,12 +4,6 @@
  *i2c
  *motors
 */
-
-#define COM 1
-#define SENSORS 0
-#define COMPASS 0
-#define MOTORS 0
-
 #define cal 3
 #define res 4
 #define lck 7
@@ -17,28 +11,23 @@
 #define lda 12
 #define rda 8
 
-#define mfl 10
-#define mfln 11
-#define mu 6
-#define mun 9
+#define mfl 6
+#define mfln 9
+#define mu 10
+#define mun 11
 
 #include <Wire.h>
 #include <LIS3MDL.h>
 
 LIS3MDL compass;
 
-bool clstate=0;//clock state
-bool restate=1;//reset pin state
+bool state=0;
 uint16_t sensordata, motordata, caliper;
-
-uint8_t depth;//this is for transforming the depth sensor
 
 int8_t forth, side, turn;
 int8_t fl, vr;
 
 void* calib;//stores label
-
-unsigned long timer;
 
 void split_write(int p, int pn, int8_t value){
         if(value<0){
@@ -51,34 +40,46 @@ void split_write(int p, int pn, int8_t value){
 };
 
 void toggle(){
-	delay(10);
-	clstate = digitalRead(rck);//expects what the remote clock was not
+	state = digitalRead(rck);//expects what the remote clock was not
 	digitalWrite(lck, !digitalRead(lck) );//flips the clock pin
+	Serial.println("toggle");
+	delay(500);
 }
 
 void waitcom(){
-	while(digitalRead(rck) == clstate){//waits until the remote clock toggles
+	Serial.println("waiting");
+	Serial.print("remote clock:\t");
+	Serial.println(state);
+	Serial.print("local clock:\t");
+	Serial.println(digitalRead(rck));
+	while(digitalRead(rck) == state){//waits until the remote clock changes
 	}
+	Serial.println("got a call!");
+	delay(500);
 }
 
 void readcom(void* calib, char i){
 	if(digitalRead(cal)!=bitRead(caliper, i)){//if, by chance, the boards get out of sync
-		digitalWrite(res, restate);
+		digitalWrite(res, HIGH);
 		toggle();
 		Serial.println("AAAAAAHHHHHH!!!! out of sync!");
-		restate=!restate;
 		goto *calib;
 	}
 
+	Serial.println("readcom");
 	if(digitalRead(rda)){
 		bitSet(motordata, i);//if topside sent a 1
 	}else{
 		bitClear(motordata, i);//if topside sent a 0
 	}
+	Serial.println("");
+	delay(500);
 }
 
 void sendcom(char i){
 	digitalWrite(lda, bitRead(sensordata, i));
+	Serial.println("sendcom");
+	delay(500);
 }
 
 void setup(){
@@ -96,12 +97,11 @@ void setup(){
 	pinMode(mu, OUTPUT);
 	pinMode(mun, OUTPUT);
 	
-#if SENSORS
-	Wire.begin();
+/*
 	compass.init();
 	compass.enableDefault();
 	delay(1);
-#endif
+*/
 	sensordata=0b0101001100001111;
 	caliper=0b1011001111000010;
 	Serial.begin(115200);
@@ -112,13 +112,13 @@ void loop(){
 	//label- this is a flag for the goto statements, if the boards get out of sync
 beginloop:
 	calib=&&beginloop;
+	Serial.println("labellabellabel");
 //sensors///////////////////////////////////////////////////
-	sensordata=0;
-#if COMPASS
 	/*sensordata has two bytes in it, and the data itself has two halves as well
 	 *sensordata = XXXXXXXX XXXXXXXX ;
 	 *compass value-^^^         ^^^-depth value
-	*/
+	*\/
+
 	compass.read();
 	if((unsigned int)compass.m.y<=(unsigned int)compass.m.x){
 		sensordata=(uint16_t)(180.0+atan2(compass.m.y,compass.m.x)*180/M_PI);
@@ -126,29 +126,29 @@ beginloop:
 		sensordata=(uint16_t)(270.0-atan2(compass.m.x,compass.m.y)*180/M_PI);
 	}
 	//make space for depth
-	sensordata=sensordata >> 1;
-#endif
-#if SENSORS
-	//depth value
-	depth=(uint8_t)analogRead(3);
-	depth-=99;//air pressure is 100, so we take that off- although leave some on for rounding up
-	depth>>=2;//divide by 4
+	sensordata=sensordata << 7;
 	
-	//add depth value onto sensordata without erasing the compass value
+	//depth- add onto sensordata without erasing the compass value
 	//bitmasks: 0xff00 and 0x00ff help us ensure the bits can only be written in certain areas
 	//they allow bits to be written to the areas shown below:
 	//            XXXXXXXX --------        -------- XXXXXXXX
-	sensordata=( 0xff00 & depth )|( 0x00ff & sensordata );
-#endif
+	sensordata=( 0xff00 & sensordata )|( 0x00ff & analogRead(3) );
+*/
 //com///////////////////////////////////////////////////////
-#if COM
-	Serial.print("com");
-	//timer=micros();
 	for(char i= 0x0f ; i>=0; i--){
+	Serial.print("bit# ");
+	Serial.println(i,HEX);
 		waitcom();
 		readcom(calib, i);
 		sendcom(i);
 		toggle();
+	}
+
+	//debug print
+	Serial.print("\tmotordata= ");
+        Serial.println(motordata,BIN);
+//i2c///////////////////////////////////////////////////////
+/*
 	}
 	//timer=micros()-timer;
 
@@ -165,21 +165,3 @@ beginloop:
 	Wire.endTransmission(8);
 #endif
 //motors////////////////////////////////////////////////////
-#if MOTORS
-	//first, to extract the info from motordata
-	forth = (motordata >>8) & 0xf0;
-	side  = (motordata >>8) & 0x0f;
-	side  = side << 4;
-	vr    = motordata & 0xf0;
-	turn  = motordata & 0x0f;
-	turn  = turn  << 2;
-
-	//front left motor
-	fl=forth+side+turn;
-	split_write(mfl, mfln, fl);
-
-	//vertical motors
-	split_write(mu, mun, vr);
-#endif
-}
-
